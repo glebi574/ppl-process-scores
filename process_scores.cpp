@@ -113,6 +113,14 @@ static std::vector<CustomScore> monthly_leaderboard;
 static int level_counter = 0;
 static int account_counter = 0;
 
+template <typename T>
+int get_index_of_score_by(std::vector<T>& leaderboard, int account_id) {
+  for (int i = 0; i < leaderboard.size(); ++i)
+    if (leaderboard[i].account_id == account_id)
+      return i;
+  return -1;
+}
+
 void fix_line(std::string& line) { // to fix line ending issues
   line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
 }
@@ -312,6 +320,26 @@ double get_era2_leaderboard_score(int rank, int player_amount) {
   return __era2_r * pow(player_amount, 1.f / 6.f) / sqrt(rank);
 }
 
+int get_wr_amount(std::vector<std::vector<Score1p>>& level_leaderboards, std::vector<int>& level_ids, int account_id) {
+  int wr_amount = 0;
+  for (int level_id : level_ids)
+    if (level_leaderboards[level_id][0].account_id == account_id)
+      ++wr_amount;
+  return wr_amount;
+}
+
+double get_average_place(std::vector<std::vector<Score1p>>& level_leaderboards, std::vector<int>& level_ids, int account_id) {
+  double average_place = 0;
+  int place_amount = 0;
+  int place = 0;
+  for (int level_id : level_ids)
+    if ((place = get_index_of_score_by(level_leaderboards[level_id], account_id)) != -1) {
+      average_place += place;
+      ++place_amount;
+    }
+  return place_amount == 0 ? 0 : average_place / place_amount + 1;
+}
+
 void create_leaderboards() {
   create_level_leaderboards();
   create_monthly_leaderboard();
@@ -321,8 +349,15 @@ int extract_monthly_leaderboard() {
   std::ofstream monthly_leaderboard_fstream;
   if (open_fstream(monthly_leaderboard_path, monthly_leaderboard_fstream))
     return 1;
-  for (CustomScore& score : monthly_leaderboard)
-    monthly_leaderboard_fstream << '\"' << account_names[score.account_id] << "\"," << score.value << ',' << score.country << std::endl;
+  for (CustomScore& score : monthly_leaderboard) {
+    monthly_leaderboard_fstream << account_uuids[score.account_id] << ",\""
+      << account_names[score.account_id] << "\","
+      << score.country << ','
+      << score.value << ','
+      << get_wr_amount(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << ','
+      << std::fixed << std::setprecision(4)
+      << get_average_place(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << std::endl;
+  }
   monthly_leaderboard_fstream.close();
 
   return 0;
