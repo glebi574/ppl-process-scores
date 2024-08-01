@@ -350,13 +350,13 @@ int extract_monthly_leaderboard() {
   if (open_fstream(monthly_leaderboard_path, monthly_leaderboard_fstream))
     return 1;
   for (CustomScore& score : monthly_leaderboard) {
-    monthly_leaderboard_fstream << account_uuids[score.account_id] << ",\""
+    monthly_leaderboard_fstream << std::fixed << std::setprecision(0)
+      << account_uuids[score.account_id] << ",\""
       << account_names[score.account_id] << "\","
       << score.country << ','
       << score.value << ','
       << get_wr_amount(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << ','
-      << std::fixed << std::setprecision(4)
-      << get_average_place(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << std::endl;
+      << std::setprecision(4) << get_average_place(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << std::endl;
   }
   monthly_leaderboard_fstream.close();
 
