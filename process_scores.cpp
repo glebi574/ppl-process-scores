@@ -1,383 +1,282 @@
 ﻿#include <iostream>
+#include <algorithm>
+#include <string>
 #include <cmath>
-#include <filesystem>
 #include <vector>
+#include <unordered_map>
 #include <fstream>
-#include <regex>
+#include <filesystem>
+
+static std::unordered_map<std::string, int> level_uuid_mapping;
+static std::unordered_map<std::string, int> level_name_mapping;
+static std::unordered_map<std::string, int> account_uuid_mapping;
+static std::unordered_map<std::string, int> account_name_mapping;
+static std::vector<std::string> level_names;
+static std::vector<std::string> account_names;
+static std::vector<std::string> account_uuids;
+
+struct BaseScore { // base score, used to temporarily store data
+  int account1_id; // 1st player id
+  int account2_id = -1; // 2nd player id
+  int level_id; // local level id
+  int level_version; // level version
+  int value; // score value
+  int type; // score type 0 - usual, 1 - speedrun
+  uint64_t timestamp; // timestamp
+  std::string country; // country 2 letters
+
+  BaseScore(std::vector<std::string>& data) {
+    size_t pos;
+    if ((pos = data[0].find(',')) == std::string::npos)
+      account1_id = account_uuid_mapping[data[0]];
+    else {
+      account1_id = account_uuid_mapping[data[0].substr(0, pos)];
+      account2_id = account_uuid_mapping[data[0].substr(pos + 1, std::string::npos)];
+    }
+    level_id = level_uuid_mapping[data[1]];
+    level_version = std::stoi(data[2]);
+    value = std::stoi(data[3]);
+    type = std::stoi(data[4]);
+    timestamp = std::stoul(data[5]);
+    if (data.size() == 7)
+      country = data[6];
+  }
+};
 
 struct Score1p {
-  unsigned long int timestamp;
-  int era;
-  int score;
-  std::string name;
-  std::string level_name;
-  std::string country;
-  std::string platform;
+  int account_id; // player id
+  int level_id; // local level id
+  int value; // score value
+  uint64_t timestamp; // timestamp
+  std::string country; // country 2 letters
 
-  Score1p(unsigned long int _timestamp, int _era, int _score, std::string& _name, std::string& _level_name, std::string& _country, std::string& _platform) {
-    timestamp = _timestamp;
-    era = _era;
-    score = _score;
-    name = _name;
-    level_name = _level_name;
-    country = _country;
-    platform = _platform;
-  }
-
-  void print() {
-    std::cout << timestamp
-      << " " << era
-      << " " << score
-      << " \"" << name
-      << "\" \"" << level_name
-      << "\" \"" << country
-      << "\" \"" << platform << "\"\n";
+  Score1p(BaseScore& score) {
+    account_id = score.account1_id;
+    level_id = score.level_id;
+    value = score.value;
+    timestamp = score.timestamp;
+    country = score.country;
   }
 };
 
 struct Score2p {
-  unsigned long int timestamp;
-  int era;
-  int score;
-  std::string name1;
-  std::string name2;
-  std::string level_name;
-  std::string country;
+  int account1_id; // 1st player id
+  int account2_id; // 2nd player id
+  int level_id; // local level id
+  int value; // score value
+  uint64_t timestamp; // timestamp
 
-  Score2p(unsigned long int _timestamp, int _era, int _score, std::string& _name1, std::string& _name2, std::string& _level_name, std::string& _country) {
-    timestamp = _timestamp;
-    era = _era;
-    score = _score;
-    name1 = _name1;
-    name2 = _name2;
-    level_name = _level_name;
-    country = _country;
-  }
-
-  void print() {
-    std::cout << timestamp
-      << " " << era
-      << " " << score
-      << " \"" << name1
-      << "\" \"" << name2
-      << "\" \"" << level_name
-      << "\" \"" << country << "\"\n";
-  }
-};
-
-struct Score {
-  unsigned long int timestamp;
-  int era;
-  int mode; // 0 - singleplayer, 1 - multiplayer
-  int score;
-  std::string name1;
-  std::string name2; // empty string, if mode == 0
-  std::string level_name;
-  std::string country;
-  std::string platform;
-
-  void print() {
-    std::cout << timestamp
-      << " " << era
-      << " " << mode
-      << " " << score
-      << " \"" << name1
-      << "\" \"" << name2
-      << "\" \"" << level_name
-      << "\" \"" << country
-      << "\" \"" << platform << "\"\n";
-  }
-
-  Score1p to_1p() {
-    return Score1p(timestamp, era, score, name1, level_name, country, platform);
-  }
-
-  Score2p to_2p() {
-    return Score2p(timestamp, era, score, name1, name2, level_name, country);
-  }
-
-  bool is_1p() {
-    return mode == 0;
-  }
-};
-
-struct Leaderboard1p {
-  std::string level_name;
-  std::vector<Score1p> scores;
-
-  Leaderboard1p() {}
-
-  Leaderboard1p(std::string& name) {
-    level_name = name;
-  }
-
-  int index_of_score_by(std::string& name) {
-    for (int i = 0; i < scores.size(); ++i)
-      if (scores[i].name == name)
-        return i;
-    return -1;
-  }
-
-  void print() {
-    std::cout << level_name << '\n';
-    for (int i = 0; i < scores.size(); ++i) {
-      std::cout << i + 1 << ". ";
-      scores[i].print();
-    }
-    std::cout << std::endl;
-  }
-};
-
-struct Leaderboard2p {
-  std::string level_name;
-  std::vector<Score2p> scores;
-
-  Leaderboard2p() {}
-
-  Leaderboard2p(std::string& name) {
-    level_name = name;
-  }
-
-  int index_of_score_by(std::string& name1, std::string& name2) {
-    for (int i = 0; i < scores.size(); ++i)
-      if (scores[i].name1 == name1 && scores[i].name2 == name2 || scores[i].name1 == name2 && scores[i].name2 == name1)
-        return i;
-    return -1;
-  }
-
-  void print() {
-    std::cout << level_name << " 2p\n";
-    for (int i = 0; i < scores.size(); ++i) {
-      std::cout << i + 1 << ". ";
-      scores[i].print();
-    }
-    std::cout << std::endl;
+  Score2p(BaseScore& score) {
+    account1_id = score.account1_id;
+    account2_id = score.account2_id;
+    level_id = score.level_id;
+    value = score.value;
+    timestamp = score.timestamp;
   }
 };
 
 struct CustomScore {
-  double score;
-  std::string name;
-  std::string country;
-  std::string platform;
+  int account_id; // account id
+  double value; // score vlaue
+  std::string country; // country 2 letters
 
-  CustomScore(Score1p score) {
-    name = score.name;
+  CustomScore() {}
+
+  CustomScore(Score1p& score) {
+    account_id = score.account_id;
     country = score.country;
-    platform = score.platform;
-  }
-
-  void print() {
-    std::cout << score
-      << " \"" << name
-      << "\" \"" << country
-      << "\" \"" << platform << "\"\n";
   }
 };
 
-struct CustomLeaderboard {
-  std::vector<CustomScore> scores;
+static std::string folder_path;
+static std::string level_data_path = "level_data.csv";
+static std::string account_data_path = "account_data.csv";
+static std::string score_data_path = "score_data.csv";
+static std::string monthly_leaderboard_levels_path = "monthly_leaderboard_levels.txt";
 
-  int index_of_score_by(std::string& name) {
-    for (int i = 0; i < scores.size(); ++i)
-      if (scores[i].name == name)
-        return i;
-    return -1;
-  }
+static std::string monthly_leaderboard_path = "monthly_leaderboard.csv";
 
-  void print() {
-    std::cout << "Custom leaderboard\n";
-    for (int i = 0; i < scores.size(); ++i) {
-      std::cout << i + 1 << ". ";
-      scores[i].print();
-    }
-    std::cout << std::endl;
-  }
-};
-
-static std::string scores_file = "score.csv";
-static std::string monthly_leaderboard_levels_file = "monthly_leaderboard_levels.txt";
-static std::string monthly_leaderboard_output_file = "monthly_leaderboard.csv";
-static std::string era2_leaderboard_output_file = "era2_leaderboard.csv";
-static std::string era2_leaderboard_output_file_1p = "era2_leaderboard_1p.csv";
-static std::string era2_leaderboard_output_file_2p = "era2_leaderboard_2p.csv";
-
-static std::vector<std::string> monthly_leaderboard_levels;
-static std::vector<Score> scores;
 static std::vector<Score1p> scores_1p;
+static std::vector<Score1p> speedrun_scores_1p;
 static std::vector<Score2p> scores_2p;
-static std::vector<Leaderboard1p> level_leaderboards_1p;
-static std::vector<Leaderboard2p> level_leaderboards_2p;
-static CustomLeaderboard monthly_leaderboard;
-static CustomLeaderboard era2_leaderboard;
-static CustomLeaderboard era2_leaderboard_1p;
-static CustomLeaderboard era2_leaderboard_2p;
+static std::vector<Score2p> speedrun_scores_2p;
 
-int vector_index_of(std::vector<std::string>& vec, std::string& str) {
-  for (int i = 0; i < vec.size(); ++i)
-    if (vec[i] == str)
-      return i;
-  return -1;
-}
+static std::vector<std::vector<Score1p>> level_leaderboards_1p;
+static std::vector<std::vector<Score1p>> speedrun_level_leaderboards_1p;
+static std::vector<std::vector<Score2p>> level_leaderboards_2p;
+static std::vector<std::vector<Score2p>> speedrun_level_leaderboards_2p;
 
-int leaderboards_1p_index_of_level(std::string& level_name) {
-  for (int i = 0; i < level_leaderboards_1p.size(); ++i)
-    if (level_leaderboards_1p[i].level_name == level_name)
-      return i;
-  return -1;
-}
+static std::vector<int> monthly_leaderboard_levels;
 
-int leaderboards_2p_index_of_level(std::string& level_name) {
-  for (int i = 0; i < level_leaderboards_2p.size(); ++i)
-    if (level_leaderboards_2p[i].level_name == level_name)
-      return i;
-  return -1;
+static std::vector<CustomScore> monthly_leaderboard;
+
+static int level_counter = 0;
+static int account_counter = 0;
+
+void fix_line(std::string& line) { // to fix line ending issues
+  line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
 }
 
 std::vector<std::string> split_line(std::string& line) {
+  fix_line(line);
   std::vector<std::string> strings;
   std::string str = "";
   bool in_quotes = false;
-  for (char c : line) {
+  for (char c : line)
     if (c == '\"')
       in_quotes = !in_quotes;
     else if (c == ',' && !in_quotes) {
-      str.erase(remove(str.begin(), str.end(), '\"'), str.end());
+      str.erase(std::remove(str.begin(), str.end(), '\"'), str.end());
       strings.push_back(str);
       str = "";
     }
     else
       str += c;
+  if (line.back() != ',') { // issues in their database
+    str.erase(std::remove(str.begin(), str.end(), '\"'), str.end());
+    strings.push_back(str);
   }
-  str.erase(remove(str.begin(), str.end(), '\"'), str.end());
-  strings.push_back(str);
   return strings;
 }
 
-Score process_line(std::string& line) {
-  std::vector<std::string> strings = split_line(line);
-  Score score;
-  score.timestamp = std::stoul(strings[0]);
-  score.era = std::stoi(strings[1]);
-  score.name1 = strings[2];
-  score.name2 = strings[3];
-  score.level_name = strings[4];
-  score.score = std::stoi(strings[5]);
-  score.country = strings[6];
-  score.platform = strings[7];
-  score.mode = std::stoi(strings[8]);
-  return score;
-}
-
-void fix_line(std::string& line) {
-  line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
-}
-
-int load_scores() {
-  if (std::filesystem::exists(scores_file))
-    std::cout << "Processing data." << std::endl;
-  else {
-    std::cout << "Scores file doesn't exist." << std::endl;
+int open_fstream(std::string& path, std::ifstream& __fstream) {
+  if (!std::filesystem::exists(path)) {
+    std::cout << "Can't find " << path << std::endl;
     return 1;
   }
-
-  std::ifstream scores_fstream(scores_file);
-  if (!scores_fstream.is_open()) {
-    std::cout << "Failed to open scores file." << std::endl;
+  __fstream = std::ifstream(path);
+  if (!__fstream.is_open()) {
+    std::cout << "Failed to open " << path << std::endl;
     return 1;
   }
-
-  std::string line;
-  while (std::getline(scores_fstream, line)) {
-    fix_line(line);
-    scores.push_back(process_line(line));
-  }
-  scores_fstream.close();
+  std::cout << "Loading " << path << std::endl;
   return 0;
 }
 
-int load_monthly_leaderboard_levels() {
-  if (std::filesystem::exists(monthly_leaderboard_levels_file))
-    std::cout << "Loading monthly leaderboard levels." << std::endl;
-  else {
-    std::cout << "Monthly leaderboard levels file doesn't exist." << std::endl;
+int open_fstream(std::string& path, std::ofstream& __fstream) {
+  __fstream = std::ofstream(path);
+  if (!__fstream.is_open()) {
+    std::cout << "Failed to open " << path << std::endl;
     return 1;
   }
-  std::ifstream monthly_leaderboard_levels_fstream(monthly_leaderboard_levels_file);
-  if (!monthly_leaderboard_levels_fstream.is_open()) {
-    std::cout << "Failed to open monthly leaderboard levels file." << std::endl;
-    return 1;
-  }
+  std::cout << "Writing to " << path << std::endl;
+  return 0;
+}
+
+void skip_line(std::ifstream& __fstream) { // their scv files start with data names
+  std::string str;
+  std::getline(__fstream, str);
+}
+
+int load_data() { // loads scores
+  account_uuid_mapping["0"] = account_counter;
+  account_name_mapping["?"] = account_counter++;
+  account_uuids.push_back("0");
+  account_names.push_back("?");
 
   std::string line;
+  std::ifstream level_mapping_fstream;
+  if (open_fstream(level_data_path, level_mapping_fstream))
+    return 1;
+  skip_line(level_mapping_fstream);
+  while (std::getline(level_mapping_fstream, line)) {
+    std::vector<std::string> level_info = split_line(line);
+    level_uuid_mapping[level_info[0]] = level_counter;
+    level_name_mapping[level_info[1]] = level_counter++;
+    level_names.push_back(level_info[1]);
+  }
+  level_mapping_fstream.close();
+
+  std::ifstream account_mapping_fstream;
+  if (open_fstream(account_data_path, account_mapping_fstream))
+    return 1;
+  skip_line(account_mapping_fstream);
+  while (std::getline(account_mapping_fstream, line)) {
+    std::vector<std::string> account_info = split_line(line);
+    account_uuid_mapping[account_info[0]] = account_counter;
+    account_name_mapping[account_info[1]] = account_counter++;
+    account_uuids.push_back(account_info[0]);
+    account_names.push_back(account_info[1]);
+  }
+  account_mapping_fstream.close();
+
+  std::ifstream monthly_leaderboard_levels_fstream;
+  if (open_fstream(monthly_leaderboard_levels_path, monthly_leaderboard_levels_fstream))
+    return 1;
   while (std::getline(monthly_leaderboard_levels_fstream, line)) {
     fix_line(line);
-    monthly_leaderboard_levels.push_back(line);
+    if (level_name_mapping.find(line) == level_name_mapping.end()) {
+      std::cout << "Level with specified name doesn't exist: " << line << std::endl;
+      return 1;
+    }
+    else
+      monthly_leaderboard_levels.push_back(level_name_mapping[line]);
   }
   monthly_leaderboard_levels_fstream.close();
+
+  std::vector<BaseScore> initial_scores; // initial data
+  std::vector<int> level_versions;
+  for (int i = 0; i < level_counter; ++i)
+    level_versions.push_back(0);
+  std::ifstream score_data_fstream;
+  if (open_fstream(score_data_path, score_data_fstream))
+    return 1;
+  skip_line(score_data_fstream);
+  while (std::getline(score_data_fstream, line)) {
+    std::vector<std::string> data = split_line(line);
+    BaseScore base_score(data);
+    initial_scores.push_back(base_score);
+    if (base_score.level_version > level_versions[base_score.level_id])
+      level_versions[base_score.level_id] = base_score.level_version;
+  }
+  score_data_fstream.close();
+
+  for (BaseScore& base_score : initial_scores) {
+    if (base_score.level_version < level_versions[base_score.level_id])
+      continue;
+    if (base_score.account2_id == -1)
+      if (base_score.type)
+        speedrun_scores_1p.push_back(Score1p(base_score));
+      else
+        scores_1p.push_back(Score1p(base_score));
+    else
+      if (base_score.type)
+        speedrun_scores_2p.push_back(Score2p(base_score));
+      else
+        scores_2p.push_back(Score2p(base_score));
+  }
+
   return 0;
 }
 
-Leaderboard1p create_leaderboard_1p(std::string& level_name) {
-  Leaderboard1p leaderboard(level_name);
-  for (Score1p& score : scores_1p)
-    if (score.level_name == level_name) {
-      int index = leaderboard.index_of_score_by(score.name);
-      if (index == -1)
-        leaderboard.scores.push_back(score);
-      else
-        leaderboard.scores[index] = score;
-    }
-  return leaderboard;
+template <typename T>
+bool compare_score(T& a, T& b) {
+  return a.value > b.value;
 }
 
-void process_scores() {
-  for (Score& score : scores)
-    if (score.is_1p())
-      scores_1p.push_back(score.to_1p());
-    else
-      scores_2p.push_back(score.to_2p());
-  scores.clear();
-
-  for (Score1p& score : scores_1p) {
-    int level_index = leaderboards_1p_index_of_level(score.level_name);
-    if (level_index == -1) {
-      Leaderboard1p leaderboard(score.level_name);
-      leaderboard.scores.push_back(score);
-      level_leaderboards_1p.push_back(leaderboard);
-    }
-    else {
-      int score_index = level_leaderboards_1p[level_index].index_of_score_by(score.name);
-      if (score_index == -1)
-        level_leaderboards_1p[level_index].scores.push_back(score);
-      else
-        level_leaderboards_1p[level_index].scores[score_index] = score;
-    }
+void create_level_leaderboards() { // creates leaderboards for every level
+  for (int i = 0; i < level_counter; ++i) {
+    level_leaderboards_1p.push_back({});
+    speedrun_level_leaderboards_1p.push_back({});
+    level_leaderboards_2p.push_back({});
+    speedrun_level_leaderboards_2p.push_back({});
   }
-  for (Leaderboard1p& leaderboard : level_leaderboards_1p)
-    std::sort(leaderboard.scores.begin(), leaderboard.scores.end(), [](const Score1p& a, const Score1p& b) {
-    return a.score > b.score;
-      });
 
-  for (Score2p& score : scores_2p) {
-    int level_index = leaderboards_2p_index_of_level(score.level_name);
-    if (level_index == -1) {
-      Leaderboard2p leaderboard(score.level_name);
-      leaderboard.scores.push_back(score);
-      level_leaderboards_2p.push_back(leaderboard);
-    }
-    else {
-      int score_index = level_leaderboards_2p[level_index].index_of_score_by(score.name1, score.name2);
-      if (score_index == -1)
-        level_leaderboards_2p[level_index].scores.push_back(score);
-      else if (score.score > level_leaderboards_2p[level_index].scores[score_index].score)
-        level_leaderboards_2p[level_index].scores[score_index] = score;
-    }
+  for (Score1p& score : scores_1p)
+    level_leaderboards_1p[score.level_id].push_back(score);
+  for (Score1p& score : speedrun_scores_1p)
+    speedrun_level_leaderboards_1p[score.level_id].push_back(score);
+  for (Score2p& score : scores_2p)
+    level_leaderboards_2p[score.level_id].push_back(score);
+  for (Score2p& score : speedrun_scores_2p)
+    speedrun_level_leaderboards_2p[score.level_id].push_back(score);
+
+  for (int i = 0; i < level_counter; ++i) {
+    std::sort(level_leaderboards_1p[i].begin(), level_leaderboards_1p[i].end(), compare_score<Score1p>);
+    std::sort(speedrun_level_leaderboards_1p[i].begin(), speedrun_level_leaderboards_1p[i].end(), compare_score<Score1p>);
+    std::sort(level_leaderboards_2p[i].begin(), level_leaderboards_2p[i].end(), compare_score<Score2p>);
+    std::sort(speedrun_level_leaderboards_2p[i].begin(), speedrun_level_leaderboards_2p[i].end(), compare_score<Score2p>);
   }
-  for (Leaderboard2p& leaderboard : level_leaderboards_2p)
-    std::sort(leaderboard.scores.begin(), leaderboard.scores.end(), [](const Score2p& a, const Score2p& b) {
-    return a.score > b.score;
-      });
 }
 
 int get_monthly_leaderboard_score(int i) {
@@ -390,114 +289,76 @@ int get_monthly_leaderboard_score(int i) {
   return 0;
 }
 
+void create_monthly_leaderboard() {
+  std::unordered_map<int, CustomScore> tmp_monthly_leaderboard;
+  for (int level_id : monthly_leaderboard_levels) {
+    std::vector<Score1p>& level_leaderboard = level_leaderboards_1p[level_id];
+    for (int i = 0; i < 25 && i < level_leaderboard.size(); ++i)
+      if (tmp_monthly_leaderboard.find(level_leaderboard[i].account_id) == tmp_monthly_leaderboard.end()) {
+        CustomScore score(level_leaderboard[i]);
+        score.value = get_monthly_leaderboard_score(i);
+        tmp_monthly_leaderboard[score.account_id] = score;
+      }
+      else
+        tmp_monthly_leaderboard[level_leaderboard[i].account_id].value += get_monthly_leaderboard_score(i);
+  }
+  for (auto& pair : tmp_monthly_leaderboard)
+    monthly_leaderboard.push_back(pair.second);
+  std::sort(monthly_leaderboard.begin(), monthly_leaderboard.end(), compare_score<CustomScore>);
+}
+
 const double __era2_r = 100.f * sqrt(2.f);
 double get_era2_leaderboard_score(int rank, int player_amount) {
   return __era2_r * pow(player_amount, 1.f / 6.f) / sqrt(rank);
 }
 
-void create_monthly_leaderboard() {
-  for (std::string& monthly_level_name : monthly_leaderboard_levels) {
-    int level_index = leaderboards_1p_index_of_level(monthly_level_name);
-    Leaderboard1p level_leaderboard;
-    if (level_index == -1) {
-      std::cout << "Incorrect level name was provided during monthly leaderboard calculation: \"" << monthly_level_name << "\".\n";
-      continue;
-    } else
-      level_leaderboard = level_leaderboards_1p[level_index];
-    for (int i = 0; i < 25 && i < level_leaderboard.scores.size(); ++i) {
-      int score_index = monthly_leaderboard.index_of_score_by(level_leaderboard.scores[i].name);
-      if (score_index == -1) {
-        CustomScore score(level_leaderboard.scores[i]);
-        score.score = get_monthly_leaderboard_score(i);
-        monthly_leaderboard.scores.push_back(score);
-      }
-      else
-        monthly_leaderboard.scores[score_index].score += get_monthly_leaderboard_score(i);
-    }
-  }
-  std::sort(monthly_leaderboard.scores.begin(), monthly_leaderboard.scores.end(), [](const CustomScore& a, const CustomScore& b) {
-    return a.score > b.score;
-    });
+void create_leaderboards() {
+  create_level_leaderboards();
+  create_monthly_leaderboard();
 }
 
 int extract_monthly_leaderboard() {
-  std::cout << "Extracting monthly leaderboard." << std::endl;
-  std::ofstream monthly_leaderboard_fstream(monthly_leaderboard_output_file);
-  if (!monthly_leaderboard_fstream.is_open()) {
-    std::cout << "Failed to open monthly leaderboard output file." << std::endl;
+  std::ofstream monthly_leaderboard_fstream;
+  if (open_fstream(monthly_leaderboard_path, monthly_leaderboard_fstream))
     return 1;
-  }
-
-  for (CustomScore& score : monthly_leaderboard.scores)
-    monthly_leaderboard_fstream << "\"" << score.name << "\"," << score.score << "," << score.country << "," << score.platform << "\n";
+  for (CustomScore& score : monthly_leaderboard)
+    monthly_leaderboard_fstream << '\"' << account_names[score.account_id] << "\"," << score.value << ',' << score.country << std::endl;
   monthly_leaderboard_fstream.close();
+
   return 0;
 }
 
-void create_era2_leaderboards() {
-  for (Leaderboard1p& level_leaderboard : level_leaderboards_1p) {
-    for (int i = 0; i < level_leaderboard.scores.size(); ++i) {
-      int score_index = era2_leaderboard_1p.index_of_score_by(level_leaderboard.scores[i].name);
-      if (score_index == -1) {
-        CustomScore score(level_leaderboard.scores[i]);
-        score.score = get_era2_leaderboard_score(i + 1, level_leaderboard.scores.size());
-        era2_leaderboard_1p.scores.push_back(score);
-      }
-      else
-        era2_leaderboard_1p.scores[score_index].score += get_era2_leaderboard_score(i + 1, level_leaderboard.scores.size());
-    }
-  }
-  std::sort(era2_leaderboard_1p.scores.begin(), era2_leaderboard_2p.scores.end(), [](const CustomScore& a, const CustomScore& b) {
-    return a.score > b.score;
-    });
-}
-
-int extract_era2_leaderboards() {
-  std::cout << "Extracting era2 leaderboard." << std::endl;
-  std::ofstream era2_leaderboard_fstream(era2_leaderboard_output_file);
-  if (!era2_leaderboard_fstream.is_open()) {
-    std::cout << "Failed to open era2 leaderboard output file." << std::endl;
+int extraxt_leaderboards() {
+  if (extract_monthly_leaderboard())
     return 1;
-  }
 
-  era2_leaderboard_fstream << std::fixed << std::setprecision(4);
-  for (CustomScore& score : era2_leaderboard.scores)
-    era2_leaderboard_fstream << "\"" << score.name << "\"," << score.score << "," << score.country << "," << score.platform << "\n";
-  era2_leaderboard_fstream.close();
   return 0;
+}
+
+void modify_path(std::string& str) {
+  str = folder_path + str;
 }
 
 int main(int argc, char* argv[]) {
+  if (argc > 1) {
+    std::cout << "Path was provided, using it as a root directory." << std::endl;
+    folder_path = argv[1];
+    if (folder_path[folder_path.size() - 1] != '/')
+      folder_path += '/';
+    modify_path(score_data_path);
+    modify_path(account_data_path);
+    modify_path(level_data_path);
+    modify_path(monthly_leaderboard_levels_path);
+  }
+  else
+    std::cout << "Path wasn't provided, using local directory as a root instead." << std::endl;
 
-  bool testing = false;
-
-  if (!testing)
-    if (argc > 1) {
-      std::cout << "Path was provided, using it as a root directory." << std::endl;
-      std::string path = argv[1];
-      if (path[path.size() - 1] != '/')
-        path += '/';
-      scores_file = path + scores_file;
-      monthly_leaderboard_levels_file = path + monthly_leaderboard_levels_file;
-      monthly_leaderboard_output_file = path + monthly_leaderboard_output_file;
-      era2_leaderboard_output_file = path + era2_leaderboard_output_file;
-      era2_leaderboard_output_file_1p = path + era2_leaderboard_output_file_1p;
-      era2_leaderboard_output_file_2p = path + era2_leaderboard_output_file_2p;
-    }
-    else
-      std::cout << "Path wasn't provided, using local directory as a root instead." << std::endl;
-
-  if (load_scores())
+  if (load_data())
     return 1;
-  if (load_monthly_leaderboard_levels())
+  create_leaderboards();
+  if (extraxt_leaderboards())
     return 1;
-  process_scores();
-  create_monthly_leaderboard();
-  if (extract_monthly_leaderboard())
-    return 1;
-  //create_era2_leaderboards();
-  //if (extract_era2_leaderboards())
-  //  return 1;
 
+  //std::cin.get();
   return 0;
 }
