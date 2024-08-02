@@ -1,6 +1,7 @@
 ﻿#include <iostream>
 #include <algorithm>
 #include <string>
+#include <regex>
 #include <cmath>
 #include <vector>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 
 static std::unordered_map<std::string, int> level_uuid_mapping;
 static std::unordered_map<std::string, int> level_name_mapping;
+static std::unordered_map<std::string, int> level_raw_name_mapping;
 static std::unordered_map<std::string, int> account_uuid_mapping;
 static std::unordered_map<std::string, int> account_name_mapping;
 static std::vector<std::string> level_names;
@@ -121,6 +123,12 @@ int get_index_of_score_by(std::vector<T>& leaderboard, int account_id) {
   return -1;
 }
 
+static std::regex hex_color_pattern("#[0-9a-fA-F]{8}");
+std::string get_raw_name(std::string& str) {
+  std::string name = str;
+  return std::regex_replace(name, hex_color_pattern, "");
+}
+
 void fix_line(std::string& line) { // to fix line ending issues
   line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
 }
@@ -190,7 +198,8 @@ int load_data() { // loads scores
   while (std::getline(level_mapping_fstream, line)) {
     std::vector<std::string> level_info = split_line(line);
     level_uuid_mapping[level_info[0]] = level_counter;
-    level_name_mapping[level_info[1]] = level_counter++;
+    level_name_mapping[level_info[1]] = level_counter;
+    level_raw_name_mapping[get_raw_name(level_info[1])] = level_counter++;
     level_names.push_back(level_info[1]);
   }
   level_mapping_fstream.close();
@@ -213,12 +222,12 @@ int load_data() { // loads scores
     return 1;
   while (std::getline(monthly_leaderboard_levels_fstream, line)) {
     fix_line(line);
-    if (level_name_mapping.find(line) == level_name_mapping.end()) {
+    if (level_raw_name_mapping.find(line) == level_raw_name_mapping.end()) {
       std::cout << "Level with specified name doesn't exist: " << line << std::endl;
       return 1;
     }
     else
-      monthly_leaderboard_levels.push_back(level_name_mapping[line]);
+      monthly_leaderboard_levels.push_back(level_raw_name_mapping[line]);
   }
   monthly_leaderboard_levels_fstream.close();
 
@@ -332,11 +341,13 @@ double get_average_place(std::vector<std::vector<Score1p>>& level_leaderboards, 
   double average_place = 0;
   int place_amount = 0;
   int place = 0;
-  for (int level_id : level_ids)
-    if ((place = get_index_of_score_by(level_leaderboards[level_id], account_id)) != -1) {
+  for (int level_id : level_ids) {
+    if ((place = get_index_of_score_by(level_leaderboards[level_id], account_id)) != -1 && place < 25) {
       average_place += place;
       ++place_amount;
     }
+    //std::cout << get_raw_name(level_names[level_id]) << " " << get_raw_name(account_names[account_id]) << ": " << place << std::endl;
+  }
   return place_amount == 0 ? 0 : average_place / place_amount + 1;
 }
 
