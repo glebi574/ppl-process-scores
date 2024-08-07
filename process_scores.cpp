@@ -13,9 +13,16 @@ static std::unordered_map<std::string, int> level_name_mapping;
 static std::unordered_map<std::string, int> level_raw_name_mapping;
 static std::unordered_map<std::string, int> account_uuid_mapping;
 static std::unordered_map<std::string, int> account_name_mapping;
+static std::unordered_map<std::string, int> account_raw_name_mapping;
 static std::vector<std::string> level_names;
 static std::vector<std::string> account_names;
 static std::vector<std::string> account_uuids;
+
+static std::regex hex_color_pattern("#[0-9a-fA-F]{8}");
+std::string get_raw_name(std::string& str) {
+  std::string name = str;
+  return std::regex_replace(name, hex_color_pattern, "");
+}
 
 struct BaseScore { // base score, used to temporarily store data
   int account1_id; // 1st player id
@@ -59,7 +66,14 @@ struct Score1p {
     timestamp = score.timestamp;
     country = score.country;
   }
+
+  friend std::ostream& operator<<(std::ostream&, const Score1p&);
 };
+
+std::ostream& operator<<(std::ostream& os, const Score1p& score) {
+  os << get_raw_name(level_names[score.level_id]) << " " << get_raw_name(account_names[score.account_id]) << " " << score.value;
+  return os;
+}
 
 struct Score2p {
   int account1_id; // 1st player id
@@ -90,7 +104,7 @@ struct CustomScore {
   }
 };
 
-static std::string folder_path;
+static std::string input_path, output_path;
 static std::string level_data_path = "level_data.csv";
 static std::string account_data_path = "account_data.csv";
 static std::string score_data_path = "score_data.csv";
@@ -121,12 +135,6 @@ int get_index_of_score_by(std::vector<T>& leaderboard, int account_id) {
     if (leaderboard[i].account_id == account_id)
       return i;
   return -1;
-}
-
-static std::regex hex_color_pattern("#[0-9a-fA-F]{8}");
-std::string get_raw_name(std::string& str) {
-  std::string name = str;
-  return std::regex_replace(name, hex_color_pattern, "");
 }
 
 void fix_line(std::string& line) { // to fix line ending issues
@@ -211,7 +219,8 @@ int load_data() { // loads scores
   while (std::getline(account_mapping_fstream, line)) {
     std::vector<std::string> account_info = split_line(line);
     account_uuid_mapping[account_info[0]] = account_counter;
-    account_name_mapping[account_info[1]] = account_counter++;
+    account_name_mapping[account_info[1]] = account_counter;
+    account_raw_name_mapping[get_raw_name(account_info[1])] = account_counter++;
     account_uuids.push_back(account_info[0]);
     account_names.push_back(account_info[1]);
   }
@@ -351,6 +360,16 @@ double get_average_place(std::vector<std::vector<Score1p>>& level_leaderboards, 
   return place_amount == 0 ? 0 : average_place / place_amount + 1;
 }
 
+void print_places_by(std::vector<std::vector<Score1p>>& level_leaderboards, std::vector<int>& level_ids, int account_id) {
+  for (int level_id : level_ids)
+    std::cout << get_raw_name(level_names[level_id]) << " " << get_raw_name(account_names[account_id]) << ": " << get_index_of_score_by(level_leaderboards[level_id], account_id) << std::endl;
+}
+
+void print_level_leaderboard(std::vector<Score1p>& level_leaderboard) {
+  for (int i = 0; i < level_leaderboard.size(); ++i)
+    std::cout << i + 1 << ". " << level_leaderboard[i] << std::endl;
+}
+
 void create_leaderboards() {
   create_level_leaderboards();
   create_monthly_leaderboard();
@@ -381,29 +400,42 @@ int extraxt_leaderboards() {
   return 0;
 }
 
-void modify_path(std::string& str) {
-  str = folder_path + str;
+void modify_path(std::string& path, std::string& str) {
+  str = path + str;
 }
 
+static std::string arg_input_str = "-input_path=";
+static std::string arg_output_str = "-output_path=";
+
 int main(int argc, char* argv[]) {
-  if (argc > 1) {
-    std::cout << "Path was provided, using it as a root directory." << std::endl;
-    folder_path = argv[1];
-    if (folder_path[folder_path.size() - 1] != '/')
-      folder_path += '/';
-    modify_path(score_data_path);
-    modify_path(account_data_path);
-    modify_path(level_data_path);
-    modify_path(monthly_leaderboard_levels_path);
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    if (arg.find(arg_input_str) == 0) {
+      input_path = arg.substr(arg_input_str.size());
+      if (input_path[input_path.size() - 1] != '/')
+        input_path += '/';
+      modify_path(input_path, score_data_path);
+      modify_path(input_path, account_data_path);
+      modify_path(input_path, level_data_path);
+      modify_path(input_path, monthly_leaderboard_levels_path);
+    } else if (arg.find(arg_output_str) == 0) {
+      output_path = arg.substr(arg_output_str.size());
+      if (output_path[output_path.size() - 1] != '/')
+        output_path += '/';
+      modify_path(output_path, monthly_leaderboard_path);
+    }
   }
-  else
-    std::cout << "Path wasn't provided, using local directory as a root instead." << std::endl;
+  
 
   if (load_data())
     return 1;
   create_leaderboards();
   if (extraxt_leaderboards())
     return 1;
+
+  //print_places_by(level_leaderboards_1p, monthly_leaderboard_levels, account_raw_name_mapping["JF"]);
+  //for (int level_id : monthly_leaderboard_levels)
+  //  print_level_leaderboard(level_leaderboards_1p[level_id]);
 
   //std::cin.get();
   return 0;
