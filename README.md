@@ -4,9 +4,10 @@ Data processor for custom ppl leaderboards
 `g++ -std=c++17 -O2 -o process_scores process_scores.cpp`
 ## Run
 `./process_scores`  
-`./process_scores folder`  
-`./process_scores folder/`  
-All files are inputed and outputed in local or specified directory.
+`./process_scores -input_path=/input`  
+`./process_scores -output_path=/output`  
+`./process_scores -input_path=/input/ -output_path=/output/`  
+All files are inputed and outputed in local or respective specified directory.
 ## Input
 * `score_data.csv` - all scores.
 * `level_data.csv` - level uuid/name mapping.
