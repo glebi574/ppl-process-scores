@@ -17,6 +17,7 @@ static std::unordered_map<std::string, int> account_raw_name_mapping;
 static std::vector<std::string> level_names;
 static std::vector<std::string> account_names;
 static std::vector<std::string> account_uuids;
+static std::vector<std::string> account_countries; // for 2p scores
 
 static std::regex hex_color_pattern("#[0-9a-fA-F]{8}");
 std::string get_raw_name(std::string& str) {
@@ -36,7 +37,7 @@ struct BaseScore { // base score, used to temporarily store data
 
   BaseScore(std::vector<std::string>& data) {
     size_t pos;
-    if ((pos = data[0].find(',')) == std::string::npos)
+    if ((pos = data[0].find('|')) == std::string::npos)
       account1_id = account_uuid_mapping[data[0]];
     else {
       account1_id = account_uuid_mapping[data[0].substr(0, pos)];
@@ -102,6 +103,17 @@ struct CustomScore {
     account_id = score.account_id;
     country = score.country;
   }
+
+  CustomScore(Score1p& score, double v) {
+    account_id = score.account_id;
+    country = score.country;
+    value = v;
+  }
+
+  CustomScore(int __account_id, double v) {
+    account_id = __account_id;
+    value = v;
+  }
 };
 
 static std::string input_path, output_path;
@@ -111,6 +123,12 @@ static std::string score_data_path = "score_data.csv";
 static std::string monthly_leaderboard_levels_path = "monthly_leaderboard_levels.txt";
 
 static std::string monthly_leaderboard_path = "monthly_leaderboard.csv";
+static std::string era_leaderboard_1p_path = "era_leaderboard_1p.csv";
+static std::string era_speedrun_leaderboard_1p_path = "era_speedrun_leaderboard_1p.csv";
+static std::string era_leaderboard_2p_path = "era_leaderboard_2p.csv";
+static std::string era_speedrun_leaderboard_2p_path = "era_speedrun_leaderboard_2p.csv";
+static std::string era_leaderboard_2p_fixed_path = "era_leaderboard_2p_fixed.csv";
+static std::string era_speedrun_leaderboard_2p_fixed_path = "era_speedrun_leaderboard_2p_fixed.csv";
 
 static std::vector<Score1p> scores_1p;
 static std::vector<Score1p> speedrun_scores_1p;
@@ -125,6 +143,12 @@ static std::vector<std::vector<Score2p>> speedrun_level_leaderboards_2p;
 static std::vector<int> monthly_leaderboard_levels;
 
 static std::vector<CustomScore> monthly_leaderboard;
+static std::vector<CustomScore> era_leaderboard_1p;
+static std::vector<CustomScore> era_speedrun_leaderboard_1p;
+static std::vector<CustomScore> era_leaderboard_2p;
+static std::vector<CustomScore> era_speedrun_leaderboard_2p;
+static std::vector<CustomScore> era_leaderboard_2p_fixed;
+static std::vector<CustomScore> era_speedrun_leaderboard_2p_fixed;
 
 static int level_counter = 0;
 static int account_counter = 0;
@@ -133,6 +157,13 @@ template <typename T>
 int get_index_of_score_by(std::vector<T>& leaderboard, int account_id) {
   for (int i = 0; i < leaderboard.size(); ++i)
     if (leaderboard[i].account_id == account_id)
+      return i;
+  return -1;
+}
+
+int get_index_of_score_by(std::vector<Score2p>& leaderboard, int account_id) {
+  for (int i = 0; i < leaderboard.size(); ++i)
+    if (leaderboard[i].account1_id == account_id || leaderboard[i].account2_id == account_id)
       return i;
   return -1;
 }
@@ -197,6 +228,7 @@ int load_data() { // loads scores
   account_name_mapping["?"] = account_counter++;
   account_uuids.push_back("0");
   account_names.push_back("?");
+  account_countries.push_back("");
 
   std::string line;
   std::ifstream level_mapping_fstream;
@@ -223,6 +255,7 @@ int load_data() { // loads scores
     account_raw_name_mapping[get_raw_name(account_info[1])] = account_counter++;
     account_uuids.push_back(account_info[0]);
     account_names.push_back(account_info[1]);
+    account_countries.push_back("__");
   }
   account_mapping_fstream.close();
 
@@ -260,11 +293,14 @@ int load_data() { // loads scores
   for (BaseScore& base_score : initial_scores) {
     if (base_score.level_version < level_versions[base_score.level_id])
       continue;
-    if (base_score.account2_id == -1)
+    if (base_score.account2_id == -1) {
+      Score1p score(base_score);
       if (base_score.type)
-        speedrun_scores_1p.push_back(Score1p(base_score));
+        speedrun_scores_1p.push_back(score);
       else
-        scores_1p.push_back(Score1p(base_score));
+        scores_1p.push_back(score);
+      account_countries[score.account_id] = score.country;
+    }
     else
       if (base_score.type)
         speedrun_scores_2p.push_back(Score2p(base_score));
@@ -319,14 +355,14 @@ void create_monthly_leaderboard() {
   std::unordered_map<int, CustomScore> tmp_monthly_leaderboard;
   for (int level_id : monthly_leaderboard_levels) {
     std::vector<Score1p>& level_leaderboard = level_leaderboards_1p[level_id];
-    for (int i = 0; i < 25 && i < level_leaderboard.size(); ++i)
-      if (tmp_monthly_leaderboard.find(level_leaderboard[i].account_id) == tmp_monthly_leaderboard.end()) {
-        CustomScore score(level_leaderboard[i]);
-        score.value = get_monthly_leaderboard_score(i);
-        tmp_monthly_leaderboard[score.account_id] = score;
-      }
+    for (int i = 0; i < 25 && i < level_leaderboard.size(); ++i) {
+      double score_value = get_monthly_leaderboard_score(i);
+      int account_id = level_leaderboard[i].account_id;
+      if (tmp_monthly_leaderboard.find(account_id) == tmp_monthly_leaderboard.end())
+        tmp_monthly_leaderboard[account_id] = CustomScore(level_leaderboard[i], score_value);
       else
-        tmp_monthly_leaderboard[level_leaderboard[i].account_id].value += get_monthly_leaderboard_score(i);
+        tmp_monthly_leaderboard[account_id].value += score_value;
+    }
   }
   for (auto& pair : tmp_monthly_leaderboard)
     monthly_leaderboard.push_back(pair.second);
@@ -346,17 +382,57 @@ int get_wr_amount(std::vector<std::vector<Score1p>>& level_leaderboards, std::ve
   return wr_amount;
 }
 
-double get_average_place(std::vector<std::vector<Score1p>>& level_leaderboards, std::vector<int>& level_ids, int account_id) {
+int get_wr_amount(std::vector<std::vector<Score1p>>& level_leaderboards, int account_id) {
+  int wr_amount = 0;
+  for (std::vector<Score1p> level_leaderboard : level_leaderboards)
+    if (level_leaderboard[0].account_id == account_id)
+      ++wr_amount;
+  return wr_amount;
+}
+
+int get_wr_amount(std::vector<std::vector<Score2p>>& level_leaderboards, int account_id) {
+  int wr_amount = 0;
+  for (std::vector<Score2p> level_leaderboard : level_leaderboards)
+    if (level_leaderboard.size() != 0 && (level_leaderboard[0].account1_id == account_id || level_leaderboard[0].account2_id == account_id))
+      ++wr_amount;
+  return wr_amount;
+}
+
+double get_average_place(std::vector<std::vector<Score1p>>& level_leaderboards, std::vector<int>& level_ids, int account_id, int place_limiter = 0xffffffff) {
   double average_place = 0;
   int place_amount = 0;
   int place = 0;
   for (int level_id : level_ids) {
-    if ((place = get_index_of_score_by(level_leaderboards[level_id], account_id)) != -1 && place < 25) {
+    if ((place = get_index_of_score_by(level_leaderboards[level_id], account_id)) != -1 && place < place_limiter) {
       average_place += place;
       ++place_amount;
     }
-    //std::cout << get_raw_name(level_names[level_id]) << " " << get_raw_name(account_names[account_id]) << ": " << place << std::endl;
   }
+  return place_amount == 0 ? 0 : average_place / place_amount + 1;
+}
+
+double get_average_place(std::vector<std::vector<Score1p>>& level_leaderboards, int account_id, int place_limiter = 0xffffffff) {
+  double average_place = 0;
+  int place_amount = 0;
+  int place = 0;
+  for (std::vector<Score1p> level_leaderboard : level_leaderboards) {
+    if ((place = get_index_of_score_by(level_leaderboard, account_id)) != -1 && place < place_limiter) {
+      average_place += place;
+      ++place_amount;
+    }
+  }
+  return place_amount == 0 ? 0 : average_place / place_amount + 1;
+}
+
+double get_average_place(std::vector<std::vector<Score2p>>& level_leaderboards, int account_id, int place_limiter = 0xffffffff) {
+  double average_place = 0;
+  int place_amount = 0;
+  int place = 0;
+  for (std::vector<Score2p> level_leaderboard : level_leaderboards)
+    if ((place = get_index_of_score_by(level_leaderboard, account_id)) != -1 && place < place_limiter) {
+      average_place += place;
+      ++place_amount;
+    }
   return place_amount == 0 ? 0 : average_place / place_amount + 1;
 }
 
@@ -370,8 +446,84 @@ void print_level_leaderboard(std::vector<Score1p>& level_leaderboard) {
     std::cout << i + 1 << ". " << level_leaderboard[i] << std::endl;
 }
 
+void create_era_leaderboard_1p(std::vector<CustomScore>& era_leaderboard) {
+  std::unordered_map<int, CustomScore> tmp_era_leaderboard;
+  for (std::vector<Score1p> level_leaderboard : level_leaderboards_1p) {
+    for (int i = 0; i < level_leaderboard.size(); ++i) {
+      double score_value = get_era2_leaderboard_score(i + 1, level_leaderboard.size());
+      int account_id = level_leaderboard[i].account_id;
+      if (tmp_era_leaderboard.find(account_id) == tmp_era_leaderboard.end())
+        tmp_era_leaderboard[account_id] = CustomScore(level_leaderboard[i], score_value);
+      else
+        tmp_era_leaderboard[account_id].value += score_value;
+    }
+  }
+
+  for (auto& pair : tmp_era_leaderboard)
+    era_leaderboard.push_back(pair.second);
+  std::sort(era_leaderboard.begin(), era_leaderboard.end(), compare_score<CustomScore>);
+}
+
+void create_era_leaderboard_2p(std::vector<CustomScore>& era_leaderboard) {
+  std::unordered_map<int, CustomScore> tmp_era_leaderboard;
+  for (std::vector<Score2p> level_leaderboard : level_leaderboards_2p) {
+    for (int i = 0; i < level_leaderboard.size(); ++i) {
+      double score_value = get_era2_leaderboard_score(i + 1, level_leaderboard.size());
+      int account1_id = level_leaderboard[i].account1_id, account2_id = level_leaderboard[i].account2_id;
+      if (tmp_era_leaderboard.find(account1_id) == tmp_era_leaderboard.end())
+        tmp_era_leaderboard[account1_id] = CustomScore(account1_id, score_value);
+      else
+        tmp_era_leaderboard[account1_id].value += score_value;
+      if (tmp_era_leaderboard.find(account2_id) == tmp_era_leaderboard.end())
+        tmp_era_leaderboard[account2_id] = CustomScore(account2_id, score_value);
+      else
+        tmp_era_leaderboard[account2_id].value += score_value;
+    }
+  }
+
+  for (auto& pair : tmp_era_leaderboard)
+    era_leaderboard.push_back(pair.second);
+  std::sort(era_leaderboard.begin(), era_leaderboard.end(), compare_score<CustomScore>);
+}
+
+void create_era_leaderboard_2p_fixed(std::vector<CustomScore>& era_leaderboard) {
+  std::unordered_map<int, CustomScore> tmp_era_leaderboard;
+  for (std::vector<Score2p> level_leaderboard : level_leaderboards_2p) {
+    std::unordered_map<int, double> tmp_level_era_scores;
+    for (int i = 0; i < level_leaderboard.size(); ++i) {
+      double score_value = get_era2_leaderboard_score(i + 1, level_leaderboard.size());
+      int account1_id = level_leaderboard[i].account1_id, account2_id = level_leaderboard[i].account2_id;
+      if (tmp_level_era_scores.find(account1_id) == tmp_level_era_scores.end() || score_value > tmp_level_era_scores[account1_id])
+        tmp_level_era_scores[account1_id] = score_value;
+      if (tmp_level_era_scores.find(account2_id) == tmp_level_era_scores.end() || score_value > tmp_level_era_scores[account2_id])
+        tmp_level_era_scores[account2_id] = score_value;
+    }
+    for (auto& pair : tmp_level_era_scores) {
+      int account_id = pair.first;
+      if (tmp_era_leaderboard.find(account_id) == tmp_era_leaderboard.end())
+        tmp_era_leaderboard[account_id] = CustomScore(account_id, pair.second);
+      else 
+        tmp_era_leaderboard[account_id].value += pair.second;
+    }
+  }
+
+  for (auto& pair : tmp_era_leaderboard)
+    era_leaderboard.push_back(pair.second);
+  std::sort(era_leaderboard.begin(), era_leaderboard.end(), compare_score<CustomScore>);
+}
+
+void create_era_leaderboards() {
+  create_era_leaderboard_1p(era_leaderboard_1p);
+  create_era_leaderboard_1p(era_speedrun_leaderboard_1p);
+  create_era_leaderboard_2p(era_leaderboard_2p);
+  create_era_leaderboard_2p(era_speedrun_leaderboard_2p);
+  create_era_leaderboard_2p_fixed(era_leaderboard_2p_fixed);
+  create_era_leaderboard_2p_fixed(era_speedrun_leaderboard_2p_fixed);
+}
+
 void create_leaderboards() {
   create_level_leaderboards();
+  create_era_leaderboards();
   create_monthly_leaderboard();
 }
 
@@ -386,15 +538,62 @@ int extract_monthly_leaderboard() {
       << score.country << ','
       << score.value << ','
       << get_wr_amount(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << ','
-      << std::setprecision(4) << get_average_place(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id) << std::endl;
+      << std::setprecision(4) << get_average_place(level_leaderboards_1p, monthly_leaderboard_levels, score.account_id, 25) << std::endl;
   }
   monthly_leaderboard_fstream.close();
 
   return 0;
 }
 
+int extract_era_leaderboard_1p(std::vector<CustomScore>& era_leaderboard, std::string output_path) {
+  std::ofstream leaderboard_fstream;
+  if (open_fstream(output_path, leaderboard_fstream))
+    return 1;
+  for (CustomScore& score : era_leaderboard) {
+    leaderboard_fstream << std::fixed
+      << account_uuids[score.account_id] << ",\""
+      << account_names[score.account_id] << "\","
+      << score.country << ','
+      << score.value << ','
+      << std::setprecision(0) << get_wr_amount(level_leaderboards_1p, score.account_id) << ','
+      << std::setprecision(4) << get_average_place(level_leaderboards_1p, score.account_id) << std::endl;
+  }
+  leaderboard_fstream.close();
+  return 0;
+}
+
+int extract_era_leaderboard_2p(std::vector<CustomScore>& era_leaderboard, std::string output_path) {
+  std::ofstream leaderboard_fstream;
+  if (open_fstream(output_path, leaderboard_fstream))
+    return 1;
+  for (CustomScore& score : era_leaderboard) {
+    leaderboard_fstream << std::fixed
+      << account_uuids[score.account_id] << ",\""
+      << account_names[score.account_id] << "\","
+      << account_countries[score.account_id] << ','
+      << score.value << ','
+      << std::setprecision(0) << get_wr_amount(level_leaderboards_2p, score.account_id) << ','
+      << std::setprecision(4) << get_average_place(level_leaderboards_2p, score.account_id) << std::endl;
+  }
+  leaderboard_fstream.close();
+  return 0;
+}
+
+int extract_era_leaderboards() {
+  if ( extract_era_leaderboard_1p(era_leaderboard_1p, era_leaderboard_1p_path)
+    || extract_era_leaderboard_1p(era_speedrun_leaderboard_1p, era_speedrun_leaderboard_1p_path)
+    || extract_era_leaderboard_2p(era_leaderboard_2p, era_leaderboard_2p_path)
+    || extract_era_leaderboard_2p(era_speedrun_leaderboard_2p, era_speedrun_leaderboard_2p_path)
+    || extract_era_leaderboard_2p(era_leaderboard_2p_fixed, era_leaderboard_2p_fixed_path)
+    || extract_era_leaderboard_2p(era_speedrun_leaderboard_2p_fixed, era_speedrun_leaderboard_2p_fixed_path))
+    return 1;
+
+  return 0;
+}
+
 int extraxt_leaderboards() {
-  if (extract_monthly_leaderboard())
+  if ( extract_era_leaderboards()
+    || extract_monthly_leaderboard())
     return 1;
 
   return 0;
@@ -423,6 +622,12 @@ int main(int argc, char* argv[]) {
       if (output_path[output_path.size() - 1] != '/')
         output_path += '/';
       modify_path(output_path, monthly_leaderboard_path);
+      modify_path(output_path, era_leaderboard_1p_path);
+      modify_path(output_path, era_speedrun_leaderboard_1p_path);
+      modify_path(output_path, era_leaderboard_2p_path);
+      modify_path(output_path, era_speedrun_leaderboard_2p_path);
+      modify_path(output_path, era_leaderboard_2p_fixed_path);
+      modify_path(output_path, era_speedrun_leaderboard_2p_fixed_path);
     }
   }
   
