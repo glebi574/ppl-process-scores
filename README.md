@@ -13,8 +13,11 @@ All files are inputed and outputed in local or respective specified directory.
 * `level_data.csv` - level uuid/name mapping.
 * `account_data.csv` - account uuid/name mapping.
 * `monthly_leaderboard_levels.txt` - levels, which will be used in monthly leaderboard. No quotation marks, every new level name starts from next line.
+* `banned_monthly_leaderboard_levels.txt` - levels, which won't be used while randomly generating level pool for monthly leaderboard.
 ## Output
-Data in each row is stored as:  
+* `levels.txt` - list of all level names.
+* `monthly_leaderboard_pool.txt` - randomly generated list of levels for monthly leaderboard initial pool.
+Data in each row in next files is stored as:  
 `(string)account_uuid,(string)"account_name",(string)country,(int)score,(int)WR_amount,(double)average_score\n`  
 * `monthly_leaderboard.csv` - monthly leaderboard.
 * `era_leaderboard_1p.csv` - 1p leaderboard with era2 formula.
