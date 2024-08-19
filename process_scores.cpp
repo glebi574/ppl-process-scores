@@ -121,7 +121,10 @@ static std::string level_data_path = "level_data.csv";
 static std::string account_data_path = "account_data.csv";
 static std::string score_data_path = "score_data.csv";
 static std::string monthly_leaderboard_levels_path = "monthly_leaderboard_levels.txt";
+static std::string banned_monthly_leaderboard_levels_path = "banned_monthly_leaderboard_levels.txt";
 
+static std::string levels_path = "levels.txt";
+static std::string monthly_leaderboard_pool_path = "monthly_leaderboard_pool.txt";
 static std::string monthly_leaderboard_path = "monthly_leaderboard.csv";
 static std::string era_leaderboard_1p_path = "era_leaderboard_1p.csv";
 static std::string era_speedrun_leaderboard_1p_path = "era_speedrun_leaderboard_1p.csv";
@@ -141,6 +144,8 @@ static std::vector<std::vector<Score2p>> level_leaderboards_2p;
 static std::vector<std::vector<Score2p>> speedrun_level_leaderboards_2p;
 
 static std::vector<int> monthly_leaderboard_levels;
+static std::vector<int> banned_monthly_leaderboard_levels;
+static std::vector<int> monthly_leaderboard_pool;
 
 static std::vector<CustomScore> monthly_leaderboard;
 static std::vector<CustomScore> era_leaderboard_1p;
@@ -272,6 +277,20 @@ int load_data() { // loads scores
       monthly_leaderboard_levels.push_back(level_raw_name_mapping[line]);
   }
   monthly_leaderboard_levels_fstream.close();
+
+  std::ifstream banned_monthly_leaderboard_levels_fstream;
+  if (open_fstream(banned_monthly_leaderboard_levels_path, banned_monthly_leaderboard_levels_fstream))
+    return 1;
+  while (std::getline(banned_monthly_leaderboard_levels_fstream, line)) {
+    fix_line(line);
+    if (level_raw_name_mapping.find(line) == level_raw_name_mapping.end()) {
+      std::cout << "Level with specified name doesn't exist: " << line << std::endl;
+      return 1;
+    }
+    else
+      banned_monthly_leaderboard_levels.push_back(level_raw_name_mapping[line]);
+  }
+  std::sort(banned_monthly_leaderboard_levels.begin(), banned_monthly_leaderboard_levels.end(), std::greater<int>());
 
   std::vector<BaseScore> initial_scores; // initial data
   std::vector<int> level_versions;
@@ -521,10 +540,24 @@ void create_era_leaderboards() {
   create_era_leaderboard_2p_fixed(speedrun_level_leaderboards_2p, era_speedrun_leaderboard_2p_fixed);
 }
 
-void create_leaderboards() {
+void create_monthly_leaderboard_pool() {
+  std::vector<int> tmp_levels;
+  for (int i = 0; i < level_names.size(); ++i)
+    tmp_levels.push_back(i);
+  for (int i : banned_monthly_leaderboard_levels)
+    tmp_levels.erase(tmp_levels.begin() + i);
+  for (int i = 0; i < 20; ++i) {
+    int n = rand() % tmp_levels.size();
+    monthly_leaderboard_pool.push_back(tmp_levels[n]);
+    tmp_levels.erase(tmp_levels.begin() + n);
+  }
+}
+
+void process_data() {
   create_level_leaderboards();
   create_era_leaderboards();
   create_monthly_leaderboard();
+  create_monthly_leaderboard_pool();
 }
 
 int extract_monthly_leaderboard() {
@@ -591,9 +624,31 @@ int extract_era_leaderboards() {
   return 0;
 }
 
-int extraxt_leaderboards() {
+int extract_levels() {
+  std::ofstream levels_fstream;
+  if (open_fstream(levels_path, levels_fstream))
+    return 1;
+  for (std::string& name : level_names) {
+    levels_fstream << get_raw_name(name) << '\n';
+  }
+  return 0;
+}
+
+int extract_monthly_leaderboard_pool() {
+  std::ofstream levels_fstream;
+  if (open_fstream(monthly_leaderboard_pool_path, levels_fstream))
+    return 1;
+  for (int i : monthly_leaderboard_pool) {
+    levels_fstream << get_raw_name(level_names[i]) << '\n';
+  }
+  return 0;
+}
+
+int extract_data() {
   if ( extract_era_leaderboards()
-    || extract_monthly_leaderboard())
+    || extract_monthly_leaderboard()
+    || extract_levels()
+    || extract_monthly_leaderboard_pool())
     return 1;
 
   return 0;
@@ -607,6 +662,7 @@ static std::string arg_input_str = "-input_path=";
 static std::string arg_output_str = "-output_path=";
 
 int main(int argc, char* argv[]) {
+  srand(time(0));
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
     if (arg.find(arg_input_str) == 0) {
@@ -617,11 +673,14 @@ int main(int argc, char* argv[]) {
       modify_path(input_path, account_data_path);
       modify_path(input_path, level_data_path);
       modify_path(input_path, monthly_leaderboard_levels_path);
+      modify_path(input_path, banned_monthly_leaderboard_levels_path);
     } else if (arg.find(arg_output_str) == 0) {
       output_path = arg.substr(arg_output_str.size());
       if (output_path[output_path.size() - 1] != '/')
         output_path += '/';
+      modify_path(output_path, levels_path);
       modify_path(output_path, monthly_leaderboard_path);
+      modify_path(output_path, monthly_leaderboard_pool_path);
       modify_path(output_path, era_leaderboard_1p_path);
       modify_path(output_path, era_speedrun_leaderboard_1p_path);
       modify_path(output_path, era_leaderboard_2p_path);
@@ -634,8 +693,8 @@ int main(int argc, char* argv[]) {
 
   if (load_data())
     return 1;
-  create_leaderboards();
-  if (extraxt_leaderboards())
+  process_data();
+  if (extract_data())
     return 1;
 
   //print_places_by(level_leaderboards_1p, monthly_leaderboard_levels, account_raw_name_mapping["JF"]);
